@@ -1,0 +1,224 @@
+{
+    "model": {
+        "name": "SCIA MLP K25",
+        "version": "1.0",
+        "task": "Classificação do autor de mensagens do WhatsApp",
+        "num_classes": 13
+    },
+
+    "data": {
+        "train_test_split": {
+            "test_size": 0.2,
+            "stratify": true,
+            "random_state": 42
+        }
+    },
+
+    "preprocessing": {
+        "text_cleaning": {
+            "lowercase": true,
+            "remove_urls": true,
+            "remove_whatsapp_artifacts": true,
+            "normalize_whitespace": true
+        },
+
+        "whatsapp_artifacts_removed": [
+            "unknown",
+            "null",
+            "omitidos",
+            "ocultados",
+            "imagem",
+            "figurinha",
+            "audio",
+            "vídeo",
+            "video",
+            "mensagem",
+            "apagados",
+            "apagadas",
+            "media",
+            "anexo",
+            "voz",
+            "documento",
+            "contato",
+            "editados",
+            "editadas"
+        ]
+    },
+
+    "representations": {
+        "tfidf": {
+            "analyzer": "char",
+            "ngram_range": [2, 5],
+            "min_df": 3,
+            "max_features": 100000,
+            "sublinear_tf": true,
+            "artifact": "tfidf/tfidf_vectorizer.joblib"
+        },
+
+        "embedding": {
+            "model": "paraphrase-multilingual-MiniLM-L12-v2",
+            "dimension": 384,
+            "normalize_embeddings": true
+        }
+    },
+
+    "features": {
+        "temporal": {
+            "hour": {
+                "encoding": "cyclical",
+                "features": [
+                    "hora_sin",
+                    "hora_cos"
+                ],
+                "period": 24
+            },
+
+            "day": {
+                "encoding": "one_hot",
+                "drop_first": true,
+                "columns_in_order": [
+                    "dia_Quarta-feira",
+                    "dia_Quinta-feira",
+                    "dia_Segunda-feira",
+                    "dia_Sexta-feira",
+                    "dia_Sábado",
+                    "dia_Terça-feira"
+                ]
+            }
+        },
+
+        "stylometry": [
+            "caracter_por_mensagem"
+        ],
+
+        "cluster": {
+            "algorithm": "KMeans",
+            "n_clusters": 25,
+            "encoding": "one_hot",
+            "columns_in_order": [
+                "cluster_25_1",
+                "cluster_25_2",
+                "cluster_25_3",
+                "cluster_25_4",
+                "cluster_25_5",
+                "cluster_25_6",
+                "cluster_25_7",
+                "cluster_25_8",
+                "cluster_25_9",
+                "cluster_25_10",
+                "cluster_25_11",
+                "cluster_25_12",
+                "cluster_25_13",
+                "cluster_25_14",
+                "cluster_25_15",
+                "cluster_25_16",
+                "cluster_25_17",
+                "cluster_25_18",
+                "cluster_25_19",
+                "cluster_25_20",
+                "cluster_25_21",
+                "cluster_25_22",
+                "cluster_25_23",
+                "cluster_25_24"
+            ]
+        }
+    },
+
+    "feature_order": [
+        "hora_sin",
+        "hora_cos",
+        "dia_dummies",
+        "caracter_por_mensagem",
+        "cluster_25_dummies",
+        "embedding",
+        "tfidf"
+    ],
+
+    "feature_dimensions": {
+        "hora_sin": 1,
+        "hora_cos": 1,
+        "dia_dummies": 6,
+        "caracter_por_mensagem": 1,
+        "cluster_25_dummies": 24,
+        "embedding": 384,
+        "tfidf": 100000
+    },
+
+    "clustering": {
+        "dimensionality_reduction": {
+            "method": "UMAP",
+            "input_dimension": 384,
+            "n_components": 10,
+            "n_neighbors": 30,
+            "min_dist": 0.0,
+            "metric": "euclidean",
+            "random_state": 42,
+            "artifact": "clustering/umap_cluster.joblib"
+        },
+
+        "algorithm": {
+            "method": "KMeans",
+            "n_clusters": 25,
+            "artifact": "clustering/kmeans_25.joblib"
+        }
+    },
+
+    "mlp": {
+        "architecture": {
+            "input_dimension": 100416,
+            "hidden_layers": [
+                256,
+                128
+            ],
+            "activation": "ReLU",
+            "dropout": [
+                0.4,
+                0.3
+            ],
+            "output_dimension": 13
+        },
+
+        "training": {
+            "optimizer": "AdamW",
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "batch_size": 256,
+            "max_epochs": 20,
+            "class_weight": "balanced",
+            "validation_split": 0.1,
+            "validation_stratified": true,
+            "early_stopping": {
+                "metric": "macro_f1",
+                "patience": 4
+            },
+            "random_state": 42
+        },
+
+        "artifact": "model/scia_mlp_k25.pt"
+    },
+
+    "label_encoding": {
+        "method": "LabelEncoder",
+        "artifact": "model/label_encoder.joblib"
+    },
+
+    "artifacts": {
+        "model": "model/scia_mlp_k25.pt",
+        "label_encoder": "model/label_encoder.joblib",
+        "tfidf_vectorizer": "tfidf/tfidf_vectorizer.joblib",
+        "umap": "clustering/umap_cluster.joblib",
+        "kmeans": "clustering/kmeans_25.joblib"
+    },
+
+    "selection": {
+        "selected_cluster": 25,
+        "embedding": true,
+        "reason": "Modelo com maior Macro F1 entre as ablações avaliadas."
+    },
+
+    "performance": {
+        "test_accuracy": 0.34,
+        "test_macro_f1": 0.3016,
+        "test_weighted_f1": 0.35
+    }
+}

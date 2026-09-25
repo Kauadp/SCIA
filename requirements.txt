@@ -1,0 +1,16 @@
+numpy
+pandas
+
+sentence-transformers
+umap-learn
+scikit-learn
+
+fastapi
+uvicorn
+
+requests
+sqlalchemy
+psycopg[binary]
+python-dotenv
+
+groq
