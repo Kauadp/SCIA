@@ -18,6 +18,7 @@ async def worker():
         try:
             controlador.processar_mensagens_pendentes()
             controlador.processar_previsoes_pendentes()
+            controlador.enviar_mensagens_pendentes()
 
         except Exception:
             logger.exception(
