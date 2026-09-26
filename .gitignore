@@ -21,3 +21,5 @@ artifacts/tfidf/*_train.npz
 artifacts/tfidf/*_test.npz
 
 artifacts/clustering/umap_cluster.joblib
+
+keys/
