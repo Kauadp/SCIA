@@ -26,13 +26,30 @@ async def iniciar_worker():
 async def webhook(request: Request):
     try:
         payload = await request.json()
+
         mensagem = processar_webhook(payload)
 
-        if mensagem is not None:
-            controlador.processar_mensagem(mensagem)
+        if mensagem is None:
+            return {"status": "ok"}
+
+        if mensagem["mensagem"].strip().lower() == "/scan":
+
+            resposta = controlador.processar_scan(
+                membro=mensagem["membro"]
+            )
+
+            controlador.enviar_mensagem_scan(
+                texto=resposta
+            )
+
+            return {"status": "ok"}
+
+        controlador.processar_mensagem(mensagem)
 
     except Exception as e:
-        print(f"Erro ao processar payload: {e}")
+        logger.exception(
+            f"Erro ao processar payload: {e}"
+        )
 
     return {"status": "ok"}
 

@@ -7,6 +7,7 @@ import pandas as pd
 import json
 logger = logging.getLogger(__name__)
 
+COOLDOWN_MINUTOS = 5
 
 class DatabaseManager:
 
@@ -161,7 +162,10 @@ class DatabaseManager:
         query = text("""
             SELECT
                 id,
-                categoria
+                categoria,
+                autor_real,
+                autor_predito,
+                probabilidade
             FROM previsoes
             WHERE categoria IS NOT NULL
             AND status_bot = 'PENDENTE'
@@ -227,13 +231,11 @@ class DatabaseManager:
     def carregar_mensagens_bot_pendentes(self):
 
         query = text("""
-            SELECT
-                id,
-                texto
+            SELECT *
             FROM mensagens_bot
             WHERE status = 'PENDENTE_ENVIO'
-            ORDER BY id
-            LIMIT 10
+                AND gerado_em <= NOW() - INTERVAL '30 seconds'
+            ORDER BY id;
         """)
 
         with self.engine.begin() as conn:
@@ -268,6 +270,87 @@ class DatabaseManager:
                 query,
                 {"mensagem_id": mensagem_id}
             )
+
+    def pessoa_em_cooldown(self, autor_real: str) -> bool:
+        query = text("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM mensagens_bot mb
+                JOIN previsoes p
+                    ON p.id = mb.previsao_id
+                WHERE p.autor_real = :autor_real
+                AND (
+                    (
+                        mb.status = 'ENVIADO'
+                        AND mb.enviado_em >= NOW() - (
+                            :cooldown * INTERVAL '1 minute'
+                        )
+                    )
+                    OR
+                    mb.status = 'PENDENTE_ENVIO'
+                )
+            )
+        """)
+
+        with self.engine.begin() as conn:
+            return conn.execute(
+                query,
+                {
+                    "autor_real": autor_real,
+                    "cooldown": COOLDOWN_MINUTOS,
+                }
+            ).scalar()
+
+    def carregar_historico_membro(self, membro: str):
+
+        query = text("""
+            SELECT
+                autor_real,
+                autor_predito,
+                COUNT(*) AS quantidade
+            FROM previsoes
+            WHERE autor_real = :membro
+            AND probabilidade >= 0.70
+            GROUP BY autor_real, autor_predito
+            ORDER BY quantidade DESC
+        """)
+
+        with self.engine.begin() as conn:
+            return pd.read_sql(
+                query,
+                conn,
+                params={"membro": membro},
+            )
+
+    def processar_scan(self, membro: str) -> str:
+
+        historico = db.carregar_historico_membro(membro)
+
+        if historico.empty:
+            return (
+                f"🕵️ *FICHA SCIA — {membro.upper()}*\n\n"
+                f"📭 O Dispositivo ainda não possui dados suficientes "
+                f"sobre este indivíduo."
+            )
+
+        ficha = self.gerar_ficha_membro(historico)
+
+        mensagem = (
+            f"🕵️ *FICHA SCIA — {membro.upper()}*\n\n"
+            f"📊 *Mensagens analisadas:* {ficha['total']}\n"
+            f"✅ *Identidade confirmada:* {ficha['acertos']}\n"
+            f"🚨 *Identidade contestada:* {ficha['erros']}\n"
+            f"🎭 *Taxa de impostura:* "
+            f"{ficha['taxa_impostura']:.1%}\n"
+        )
+
+        if ficha["principal_confusao"] is not None:
+            mensagem += (
+                f"\n🎯 *Identidade mais atribuída:* "
+                f"{ficha['principal_confusao']}"
+            )
+
+        return mensagem
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")

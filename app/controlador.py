@@ -30,6 +30,35 @@ def classificar_previsao(
 
     return f"{tipo}_{nivel}"
 
+def montar_mensagem_deteccao(
+    autor_real: str,
+    autor_predito: str,
+    probabilidade: float,
+    texto_llm: str,
+) -> str:
+
+    prob = f"{probabilidade:.1%}"
+
+    if autor_real == autor_predito:
+        deteccao = (
+            f"🚨 *INSPETOR DETECTOU* 🚨\n\n"
+            f"O INSPETOR DESCONFIA, COM NÍVEL *{prob}* DE CERTEZA, "
+            f"QUE *{autor_real.upper()}* É QUEM DIZ SER."
+        )
+    else:
+        deteccao = (
+            f"🚨 *INSPETOR DETECTOU* 🚨\n\n"
+            f"O INSPETOR DESCONFIA, COM NÍVEL *{prob}* DE CERTEZA, "
+            f"QUE *{autor_real.upper()}* ESTÁ SE PASSANDO POR "
+            f"*{autor_predito.upper()}*."
+        )
+
+    return (
+        f"{deteccao}\n\n"
+        f"🕵️ *INSPETOR DIZ:*\n\n"
+        f"\"{texto_llm}\""
+    )
+
 class Controlador:
 
     def processar_mensagem(self, mensagem: dict):
@@ -123,16 +152,47 @@ class Controlador:
 
             previsao_id = int(previsao["id"])
 
+            categoria = previsao["categoria"]
+
+            if categoria.startswith("ACERTO"):
+                db.marcar_previsao_processada(previsao_id)
+
+                logger.info(
+                    f"Previsão {previsao_id} classificada como "
+                    f"{categoria}. Nenhuma mensagem será gerada."
+                )
+
+                continue
+
+            autor_real = previsao["autor_real"]
+
+            if db.pessoa_em_cooldown(autor_real):
+                db.marcar_previsao_processada(previsao_id)
+
+                logger.info(
+                    f"Previsão {previsao_id} ignorada por cooldown. "
+                    f"Autor: {autor_real}"
+                )
+
+                continue
+
             try:
                 texto, personalidade = gerar_mensagem(
-                    categoria=previsao["categoria"]
+                    categoria=categoria
+                )
+
+                texto_final = montar_mensagem_deteccao(
+                    autor_real=autor_real,
+                    autor_predito=previsao["autor_predito"],
+                    probabilidade=previsao["probabilidade"],
+                    texto_llm=texto,
                 )
 
                 db.inserir_mensagem_bot(
                     previsao_id=previsao_id,
-                    categoria=previsao["categoria"],
+                    categoria=categoria,
                     personalidade=personalidade,
-                    texto=texto,
+                    texto=texto_final,
                 )
 
                 db.marcar_previsao_processada(previsao_id)
@@ -182,3 +242,154 @@ class Controlador:
                 logger.exception(
                     f"Erro ao enviar mensagem {mensagem_id}."
                 )
+
+    def gerar_ficha_membro(self, historico) -> dict:
+
+        total = int(historico["quantidade"].sum())
+
+        acertos = int(
+            historico.loc[
+                historico["autor_real"] == historico["autor_predito"],
+                "quantidade"
+            ].sum()
+        )
+
+        erros = total - acertos
+        taxa_impostura = erros / total if total > 0 else 0
+
+        confundido_com = historico[
+            historico["autor_real"] != historico["autor_predito"]
+        ].copy()
+
+        confundido_com = confundido_com.sort_values(
+            "quantidade",
+            ascending=False
+        )
+
+        top_3 = confundido_com.head(3)
+
+        if taxa_impostura < 0.10:
+            titulo = "CIDADÃO EXEMPLAR"
+            perfil = (
+                "O indivíduo apresenta histórico "
+                "praticamente livre de falsificação de identidade.\n\n"
+                "O inspetor não vê motivos relevantes para suspeita."
+            )
+
+        elif taxa_impostura < 0.20:
+            titulo = "PEQUENO GOLPISTA"
+            perfil = (
+                "O indivíduo apresenta histórico "
+                "moderado de falsificação de identidade.\n\n"
+                "O inspetor recomenda vigilância."
+            )
+
+        elif taxa_impostura < 0.35:
+            titulo = "SUSPEITO RECORRENTE"
+            perfil = (
+                "O indivíduo apresenta histórico "
+                "considerável de falsificação de identidade.\n\n"
+                "O inspetor recomenda atenção redobrada."
+            )
+
+        else:
+            titulo = "AMEAÇA À IDENTIDADE ALHEIA"
+            perfil = (
+                "O indivíduo apresenta histórico grave "
+                "de falsificação de identidade.\n\n"
+                "O inspetor recomenda vigilância máxima."
+            )
+
+        return {
+            "total": total,
+            "acertos": acertos,
+            "erros": erros,
+            "taxa_impostura": taxa_impostura,
+            "top_3": top_3,
+            "titulo": titulo,
+            "perfil": perfil,
+        }
+
+    def processar_scan(self, membro: str) -> str:
+
+        historico = db.carregar_historico_membro(membro)
+
+        if historico.empty:
+            return (
+                "╔══════════════════════════╗\n"
+                "     🕵️ FICHA CRIMINAL\n"
+                "╚══════════════════════════╝\n\n"
+                f"👤 SUSPEITO\n"
+                f"{membro.upper()}\n\n"
+                "📭 O Dispositivo ainda não possui dados suficientes "
+                "sobre este indivíduo."
+            )
+
+        ficha = self.gerar_ficha_membro(historico)
+
+        total = ficha["total"]
+        acertos = ficha["acertos"]
+        erros = ficha["erros"]
+        taxa = ficha["taxa_impostura"]
+
+        percentual_acerto = acertos / total if total > 0 else 0
+
+        mensagem = (
+            "╔══════════════════════════╗\n"
+            "     🕵️ FICHA CRIMINAL\n"
+            "╚══════════════════════════╝\n\n"
+
+            "👤 SUSPEITO\n"
+            f"{membro.upper()}\n\n"
+
+            "🔎 INVESTIGAÇÕES\n"
+            f"Mensagens analisadas: {total}\n\n"
+
+            "🟢 IDENTIDADE CONFIRMADA\n"
+            f"{acertos} mensagens\n"
+            f"{percentual_acerto:.1%}\n\n"
+
+            "🔴 IMPOSTOR DETECTADO\n"
+            f"{erros} mensagens\n"
+            f"{taxa:.1%}\n\n"
+
+            "⚠️ ÍNDICE DE SUSPEITA\n"
+            f"{taxa:.1%}\n\n"
+
+            "🏷️ TÍTULO\n"
+            f"{ficha['titulo']}\n\n"
+
+            "──────────────────────────\n\n"
+
+            "🎭 QUEM "
+            f"{membro.upper()} MAIS SE PASSOU\n\n"
+        )
+
+        if ficha["top_3"].empty:
+            mensagem += "Nenhum doppelgänger identificado.\n"
+        else:
+            medalhas = ["🥇", "🥈", "🥉"]
+
+            for i, (_, linha) in enumerate(
+                ficha["top_3"].iterrows()
+            ):
+                mensagem += (
+                    f"{medalhas[i]} {linha['autor_predito'].upper()}"
+                    f" — {int(linha['quantidade'])} vezes\n"
+                )
+
+        mensagem += (
+            "\n──────────────────────────\n\n"
+
+            "📊 PERFIL DO SUSPEITO\n\n"
+            f"{ficha['perfil']}"
+        )
+
+        return mensagem
+
+    def enviar_mensagem_scan(self, texto: str):
+
+        enviar_texto(
+            numero="120363025949767428@g.us",
+            texto=texto,
+        )
