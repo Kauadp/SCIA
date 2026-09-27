@@ -44,7 +44,12 @@ async def webhook(request: Request):
 
             return {"status": "ok"}
 
-        controlador.processar_mensagem(mensagem)
+        asyncio.create_task(
+            asyncio.to_thread(
+                controlador.processar_mensagem,
+                mensagem
+            )
+        )
 
     except Exception as e:
         logger.exception(
