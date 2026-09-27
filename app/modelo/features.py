@@ -3,7 +3,6 @@ import pandas as pd
 import joblib
 
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
 
 # ============================================================
 # CAMINHOS
@@ -84,9 +83,21 @@ CLUSTER_25_COLUMNS = [
 # MODELO DE EMBEDDING
 # ============================================================
 
-embedding_model = SentenceTransformer(
-    EMBEDDING_MODEL_NAME
-)
+embedding_model = None
+
+
+
+def obter_embedding_model():
+    global embedding_model
+
+    if embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+
+        embedding_model = SentenceTransformer(
+            EMBEDDING_MODEL_NAME
+        )
+
+    return embedding_model
 
 
 # ============================================================
@@ -161,7 +172,7 @@ def criar_feature_estilometria(df):
 # ============================================================
 
 def gerar_embeddings(df):
-    embeddings = embedding_model.encode(
+    embeddings = obter_embedding_model().encode(
         df["mensagem_embedding"].tolist(),
         normalize_embeddings=True,
         convert_to_numpy=True
