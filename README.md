@@ -11,7 +11,7 @@
 
 Sistema de inteligência artificial desenvolvido para analisar mensagens de um grupo do WhatsApp, identificar padrões de comunicação e gerar intervenções automatizadas de acordo com o comportamento observado.
 
-O projeto combina **NLP, embeddings, TF-IDF, clustering, aprendizado supervisionado e geração de texto por LLM** para observar mensagens em tempo real e decidir quando uma intervenção do SCIA deve acontecer.
+O projeto combina **NLP, embeddings, TF-IDF, aprendizado supervisionado e geração de texto por LLM** para observar mensagens em tempo real e decidir quando uma intervenção do SCIA deve acontecer.
 
 ---
 
@@ -23,33 +23,85 @@ O **SCIA** nasceu a partir da análise histórica de mensagens de um grupo do Wh
 
 Para investigar essa hipótese, foi construída uma pipeline de Machine Learning utilizando aproximadamente **100 mil mensagens** de **13 participantes**.
 
-O projeto passou por diferentes etapas de processamento e modelagem:
+O projeto evoluiu de um experimento offline para um sistema capaz de receber mensagens diretamente do WhatsApp, realizar previsões e, quando uma ocorrência atende às regras de negócio, gerar uma resposta utilizando uma LLM.
 
-- análise exploratória;
-- limpeza e processamento das mensagens;
-- geração de embeddings;
-- TF-IDF;
-- redução de dimensionalidade;
-- clustering;
-- criação de variáveis temporais;
-- treinamento e comparação de modelos;
-- análise de erros e confiança;
-- integração do modelo a um sistema em tempo real;
-- monitoramento do comportamento em produção.
+A evolução do projeto ocorreu em duas versões principais:
 
-O projeto evoluiu de um experimento offline para um sistema capaz de receber mensagens diretamente do WhatsApp, realizar a previsão e, quando a confiança ultrapassa o limiar definido, gerar uma resposta utilizando uma LLM.
+- **V1:** classificação de mensagens individuais;
+- **V2:** classificação de grupos de cinco mensagens, buscando reduzir o ruído de mensagens isoladas e obter uma assinatura estilística mais representativa do autor.
 
 ---
 
 # 🎯 Objetivos
 
 - Investigar se padrões linguísticos permitem identificar os autores das mensagens;
-- construir um classificador multiclasse para prever o autor de uma mensagem;
+- construir um classificador multiclasse para prever o autor;
 - analisar os padrões de comunicação presentes no grupo;
 - identificar situações em que o modelo possui maior ou menor confiança;
+- estudar a relação entre confiança e acerto;
 - criar um sistema capaz de processar mensagens em tempo real;
 - gerar intervenções automatizadas utilizando uma LLM;
 - observar o comportamento do modelo em produção antes de habilitar o envio automático.
+
+---
+
+# 🧠 Evolução da Pipeline
+
+## V1: mensagens individuais
+
+A primeira versão tratava cada mensagem individualmente como uma observação.
+
+A pipeline combinava:
+
+- embeddings;
+- TF-IDF por caracteres;
+- características temporais;
+- características comportamentais;
+- clustering;
+- MLP.
+
+O objetivo era identificar o autor mais provável de cada mensagem.
+
+Essa abordagem apresentou desempenho limitado, especialmente devido ao ruído natural de mensagens curtas e ambíguas.
+
+## V2: grupos de cinco mensagens
+
+A segunda versão modificou a unidade de classificação.
+
+Em vez de classificar uma mensagem isolada, as mensagens de cada participante são agrupadas em blocos cronológicos de cinco mensagens.
+
+Cada grupo é representado por:
+
+- concatenação das cinco mensagens;
+- início e fim do intervalo temporal;
+- duração da sequência;
+- horário inicial e final;
+- dia da semana inicial e final;
+- quantidade de palavras;
+- quantidade de caracteres;
+- caracteres por palavra.
+
+Essa mudança busca fornecer ao modelo uma quantidade maior de evidência estilística por previsão.
+
+### Configuração selecionada da V2
+
+A análise de ablação indicou que o clustering não contribuía positivamente para o desempenho final, enquanto os embeddings continuavam fornecendo informação relevante.
+
+A configuração selecionada foi:
+
+```text
+TF-IDF por caracteres
+        +
+Embeddings
+        +
+Características temporais
+        +
+Características comportamentais
+        ↓
+       MLP
+```
+
+O clustering permanece disponível para análise exploratória e interpretação, mas **não faz parte da pipeline de inferência da V2 selecionada**.
 
 ---
 
@@ -67,13 +119,18 @@ Entre os tratamentos realizados estão:
 - criação de variáveis temporais;
 - características relacionadas ao tamanho das mensagens.
 
-Também são utilizadas informações como:
+Na V2, essas informações são agregadas ao nível do grupo de cinco mensagens.
+
+São utilizadas características como:
 
 - dia da semana;
 - horário;
+- duração do grupo;
 - quantidade de caracteres;
 - quantidade de palavras;
-- caracteres por mensagem.
+- caracteres por palavra.
+
+A duração apresenta forte assimetria e é transformada para `log_duracao`, reduzindo o efeito de grupos com intervalos excepcionalmente longos.
 
 ## 2. Representação textual
 
@@ -85,11 +142,11 @@ Foi utilizado:
 paraphrase-multilingual-MiniLM-L12-v2
 ```
 
-Cada mensagem é representada por um vetor de **384 dimensões**.
+Cada unidade textual é representada por um vetor de **384 dimensões**.
 
 ### TF-IDF
 
-A representação que apresentou melhor desempenho foi baseada em **n-gramas de caracteres**:
+A principal representação textual utiliza **n-gramas de caracteres**:
 
 ```python
 TfidfVectorizer(
@@ -107,23 +164,33 @@ A representação por caracteres permite capturar abreviações, erros de digita
 
 # 🔬 Clustering
 
-O projeto utiliza clustering como uma das fontes de informação do classificador.
+O clustering foi utilizado durante a investigação das características do conjunto de dados e como feature em versões intermediárias do classificador.
 
 O processo utiliza:
 
 - **UMAP** para redução de dimensionalidade;
-- **K-Means** para agrupamento;
-- **25 clusters** na versão final.
+- **K-Means** para agrupamento.
 
-O modelo UMAP final é armazenado em `artifacts/clustering/umap_cluster.joblib`.
+Na V1, a configuração final utilizada no classificador possuía **25 clusters**.
+
+Na V2, diferentes valores de K foram avaliados e **15 clusters** apresentaram melhor separação segundo a análise exploratória. Entretanto, a ablação mostrou que remover a feature de cluster melhorava o desempenho do classificador.
+
+Por isso, o clustering foi removido da configuração final de inferência da V2.
+
+Ele continua sendo utilizado para:
+
+- exploração dos dados;
+- interpretação dos padrões linguísticos;
+- análise de grupos semânticos;
+- investigação do comportamento do conjunto de mensagens.
 
 ### ⚠️ Artefato pesado do UMAP
 
-O artefato final do UMAP possui aproximadamente **458 MB** e, por isso, não é versionado no GitHub.
+O artefato final do UMAP possui aproximadamente **458 MB** e não é versionado no GitHub.
 
-Durante o deploy da aplicação, o arquivo é transferido **diretamente da máquina de desenvolvimento para a VM** utilizando `scp` e colocado no diretório `artifacts/clustering/` antes da construção da imagem Docker.
+Durante o deploy da aplicação, o arquivo é transferido diretamente da máquina de desenvolvimento para a VM utilizando `scp` e colocado no diretório `artifacts/clustering/` quando necessário.
 
-Essa decisão evita ultrapassar o limite de tamanho de arquivos do GitHub e mantém o restante dos artefatos versionados normalmente.
+Essa decisão evita ultrapassar o limite de tamanho de arquivos do GitHub e mantém os demais artefatos versionados normalmente.
 
 O arquivo está listado no `.gitignore`.
 
@@ -170,55 +237,134 @@ Treinamento:
 - weight decay `1e-4`;
 - batch size `256`;
 - pesos de classe balanceados;
-- early stopping.
+- early stopping;
+- random state `42`.
+
+Na V2, a matriz final possui **100.404 features**:
+
+```text
+17 features temporais
++
+3 features comportamentais
++
+384 embeddings
++
+100.000 features TF-IDF
+=
+100.404 features
+```
 
 ---
 
-# 📊 Desempenho offline
+# 📊 Resultados Offline
 
-O modelo final apresentou aproximadamente:
+## V1 — Mensagens individuais
 
-| Métrica | Teste histórico |
+O modelo final da V1 apresentou no conjunto de teste histórico:
+
+| Métrica | V1 |
 |---|---:|
-| Accuracy | 34% |
-| Macro F1 | 30,2% |
-| Weighted F1 | 35% |
+| Accuracy | **34,0%** |
+| Macro F1 | **30,2%** |
+| Weighted F1 | **35,0%** |
 
 O problema possui **13 classes**, com diferentes níveis de separabilidade entre os participantes.
 
----
+A análise posterior mostrou que a confiança do modelo continha informação útil sobre a correção das previsões, mas grande parte das mensagens apresentava baixa confiança.
 
-# 🎯 Sistema de confiança
+A V1 serviu como baseline para a evolução do projeto.
 
-A probabilidade produzida pelo classificador é utilizada para decidir se uma mensagem deve gerar uma intervenção.
+## V2 — Grupos de cinco mensagens
 
-| Probabilidade | Classificação |
-|---|---|
-| `< 0.70` | Sem intervenção |
-| `0.70 ≤ p < 0.80` | BAIXO |
-| `0.80 ≤ p < 0.90` | MEDIO |
-| `0.90 ≤ p ≤ 1.00` | ALTO |
+A V2 apresentou uma melhoria substancial em relação à abordagem de mensagens individuais.
 
-Quando a confiança é inferior a `0.70`, nenhuma mensagem é enviada para a etapa de geração.
+A configuração selecionada, sem clustering e com embeddings, apresentou:
 
-As categorias utilizadas internamente são:
+| Métrica | V2 |
+|---|---:|
+| Accuracy | **64,0%** |
+| Macro F1 | **56,9%** |
+| Weighted F1 | **64,0%** |
+
+Melhoria de Macro F1 em relação à V1:
 
 ```text
-ACERTO_BAIXO
-ACERTO_MEDIO
-ACERTO_ALTO
-ERRO_BAIXO
-ERRO_MEDIO
-ERRO_ALTO
+V1: 30,2%
+V2: 56,9%
+
++26,7 pontos percentuais
 ```
 
-As categorias `ACERTO` e `ERRO` são utilizadas durante a análise porque o autor real está disponível no banco de produção. O modelo em si não recebe essa informação para realizar a previsão.
+A melhoria está associada principalmente à mudança da unidade de classificação: a V2 utiliza grupos de cinco mensagens, fornecendo ao modelo uma quantidade maior de evidência estilística por observação.
+
+### Ablação da V2
+
+Foram avaliadas diferentes combinações de features:
+
+| Configuração | Macro F1 | Accuracy |
+|---|---:|---:|
+| V2 com clustering + embeddings | 55,3% | 62% |
+| **V2 sem clustering + embeddings** | **56,9%** | **64%** |
+| V2 sem clustering + sem embeddings | 53,9% | 59% |
+
+A análise indica que:
+
+- o clustering não melhorou o desempenho final;
+- os embeddings contribuíram positivamente;
+- a configuração selecionada combina TF-IDF, embeddings, características temporais e características comportamentais.
+
+---
+
+# 🎯 Confiança e Seleção de Previsões na V2
+
+A análise de confiança mostrou uma relação clara entre a probabilidade máxima do modelo e a taxa de acerto.
+
+| Faixa de confiança | Acurácia | N |
+|---|---:|---:|
+| ≤ 0,30 | 25,5% | 102 |
+| 0,30–0,40 | 28,2% | 280 |
+| 0,40–0,50 | 40,2% | 393 |
+| 0,50–0,60 | 42,8% | 542 |
+| 0,60–0,70 | 55,3% | 461 |
+| 0,70–0,80 | 67,4% | 488 |
+| 0,80–0,90 | **75,3%** | **575** |
+| 0,90–1,00 | **92,8%** | **1.108** |
+
+A análise de Precisão × Cobertura mostrou aproximadamente:
+
+| Cobertura | Precisão |
+|---:|---:|
+| ~19% | ~95,2% |
+| ~42,6% | ~86,8% |
+| ~61,4% | ~79,9% |
+| ~80,4% | ~71,8% |
+| ~97,4% | ~65,3% |
+
+Esse comportamento motivou a utilização de **P ≥ 0,80 como threshold da regra de negócio**.
+
+O objetivo não é eliminar todos os erros do classificador, mas retirar da camada de intervenção os casos nos quais a evidência estilística é insuficiente.
+
+A partir do threshold, os casos são classificados em:
+
+```text
+0,80 ≤ P < 0,90
+    ├── acerto → ACERTO_BAIXO
+    └── erro   → ERRO_BAIXO
+
+0,90 ≤ P ≤ 1,00
+    ├── acerto → ACERTO_ALTO
+    └── erro   → ERRO_ALTO
+```
+
+Os eventos de acerto são registrados para análise, mas **não acionam a LLM**.
+
+Apenas `ERRO_BAIXO` e `ERRO_ALTO` são candidatos a intervenção, respeitando ainda o cooldown individual de **5 minutos por pessoa**.
 
 ---
 
 # 🧩 Arquitetura
 
-O sistema é dividido em três workers principais:
+O sistema é dividido em três estágios principais:
 
 ```text
 WhatsApp
@@ -238,7 +384,7 @@ Worker 1
     ├── Pré-processamento
     ├── Features
     ├── TF-IDF
-    ├── Clustering
+    ├── Embeddings
     └── Classificação
     │
     ▼
@@ -281,16 +427,20 @@ O webhook:
 
 ## 2. Predição
 
-O primeiro worker busca mensagens ainda não processadas.
+Na V1, cada mensagem era tratada individualmente.
 
-Para cada mensagem são executadas:
+Na V2, as mensagens são consolidadas em grupos cronológicos de cinco mensagens por participante antes da classificação.
+
+Para cada grupo são executadas:
 
 1. extração das características;
 2. transformação do texto;
-3. identificação do cluster;
-4. previsão do autor;
-5. cálculo da probabilidade;
-6. classificação da confiança.
+3. geração do embedding;
+4. transformação TF-IDF;
+5. cálculo das features temporais e comportamentais;
+6. previsão do autor;
+7. cálculo da probabilidade;
+8. classificação da confiança.
 
 O resultado é armazenado em `previsoes`.
 
@@ -298,7 +448,7 @@ O resultado é armazenado em `previsoes`.
 
 O segundo worker busca previsões elegíveis.
 
-A LLM recebe:
+A LLM recebe apenas o contexto operacional definido para o evento de erro, incluindo:
 
 - categoria;
 - personalidade selecionada;
@@ -306,7 +456,7 @@ A LLM recebe:
 
 Ela **não recebe o autor real, a probabilidade da previsão ou as features utilizadas pelo classificador**.
 
-Isso mantém a geração separada da lógica de classificação.
+A decisão sobre a existência do erro pertence ao classificador e às regras de negócio.
 
 ## 4. Envio
 
@@ -338,7 +488,7 @@ O sistema possui sete personalidades:
 
 As personalidades são combinadas com as categorias produzidas pelo classificador, permitindo diferentes estilos de resposta.
 
-A LLM é responsável **exclusivamente pela geração do texto**. A decisão de intervir pertence ao pipeline de classificação e regras.
+A LLM é responsável **exclusivamente pela geração do texto**. A decisão de intervir pertence ao pipeline de classificação e às regras de negócio.
 
 ---
 
@@ -417,21 +567,17 @@ PostgreSQL
 
 ## Python 3.12
 
-A imagem do webhook foi atualizada de **Python 3.11 para Python 3.12**.
+A imagem do webhook utiliza Python 3.12.
 
-A mudança foi necessária porque o artefato `umap_cluster.joblib` apresentou incompatibilidade ao ser carregado no ambiente Python 3.11, apesar das versões das principais bibliotecas serem equivalentes. O artefato havia sido gerado no ambiente Python 3.12.
+A mudança de Python 3.11 para 3.12 foi necessária porque o artefato `umap_cluster.joblib` apresentou incompatibilidade ao ser carregado no ambiente Python 3.11, apesar das versões das principais bibliotecas serem equivalentes.
 
-A imagem atual utiliza:
+O artefato havia sido gerado no ambiente Python 3.12.
 
-```dockerfile
-FROM python:3.12-slim
-```
-
-Com Python 3.12, o carregamento do UMAP foi normalizado e o container passou a operar sem o ciclo de reinicialização observado anteriormente.
+Com Python 3.12, o carregamento do UMAP foi normalizado.
 
 ## Desempenho observado do container
 
-Na execução local atual, o consumo de memória observado foi aproximadamente:
+Na execução local, o consumo de memória observado foi aproximadamente:
 
 | Serviço | Memória |
 |---|---:|
@@ -447,11 +593,11 @@ A primeira construção completa da imagem levou aproximadamente **20 minutos** 
 
 Esses valores são referências do ambiente de desenvolvimento e podem variar conforme cache, versões das dependências e carga.
 
-### Oracle Cloud
+## Oracle Cloud
 
-A arquitetura foi construída para poder ser executada posteriormente em uma VM. Entretanto, o consumo observado indica que uma máquina com apenas **1 GB de RAM não é confortável para a versão atual** do SCIA.
+A arquitetura foi construída para execução em uma VM Oracle Cloud.
 
-A estratégia atual é continuar validando o comportamento do sistema localmente antes de realizar o deploy definitivo na VM.
+A experiência inicial mostrou que uma máquina com apenas **1 GB de RAM não é confortável para a versão atual** do SCIA, principalmente devido ao carregamento dos artefatos de NLP/ML.
 
 ---
 
@@ -563,8 +709,6 @@ O teste de Mann-Whitney é utilizado para verificar se previsões corretas tende
 - matriz de Doppelgängers;
 - identificação dos principais pares de confusão.
 
-Essa análise permite estudar a estrutura de sobreposição entre os estilos aprendidos pelo classificador.
-
 ### 4. Monitoramento da LLM e Delivery
 
 - quantidade de textos gerados;
@@ -583,86 +727,57 @@ Essa análise permite estudar a estrutura de sobreposição entre os estilos apr
 - Macro F1 por semana;
 - comparação entre janelas temporais;
 - baseline da primeira semana;
-- preparação para testes de mudança de distribuição quando houver múltiplas semanas.
-
-Com apenas uma semana de dados, o notebook registra a janela atual como **baseline de produção** e não realiza inferência de drift temporal.
+- testes de mudança de distribuição quando houver múltiplas semanas.
 
 ---
 
-# 📈 Resultados atuais em produção
+# 📈 Resultados em Produção
 
-A primeira janela consolidada de produção analisada contém **338 previsões**.
+Os resultados de produção estão sendo acompanhados separadamente dos resultados offline.
 
-### Desempenho do classificador
+A V1 possui uma janela de produção em coleta para permitir uma análise mais representativa de meia semana completa.
 
-| Métrica | Produção |
+## V1 — Produção
+
+| Métrica | V1 — Produção |
 |---|---:|
-| Accuracy | **27,81%** |
-| Macro F1 | **0,2270** |
-| Weighted F1 | **0,2985** |
+| Período analisado | **4 Dias** |
+| Previsões | **1.849** |
+| Accuracy | **27,91%** |
+| Macro F1 | **0,2446** |
+| Weighted F1 | **0,2927** |
+| Mediana de confiança — acertos | **0,6550** |
+| Mediana de confiança — erros | **0,4206** |
+| Intervenções geradas | **124** |
+| Mensagens acima do threshold (P≥0,70) | **24,12%** |
+| Taxa de intervenção | **6,71%** |
+| Latência ML | **mediana 6,14s** |
+| Latência LLM | **mediana 1,81s** |
+| Delivery | **mediana 33,86s** |
 
-O desempenho observado em produção está abaixo do desempenho do teste histórico, mas a primeira janela ainda é insuficiente para determinar se essa diferença representa uma degradação estrutural ou apenas variação da amostra.
+A análise será consolidada após uma semana completa de observação, permitindo comparar o comportamento real da V1 com o teste histórico.
 
-O desempenho também é heterogêneo entre os participantes. Na amostra atual, alguns membros apresentam F1 mais elevado que outros, indicando diferentes níveis de separabilidade entre os estilos.
+## V2 — Produção
 
-### Confiança das previsões
+> **Status: ainda não avaliada em produção.**
 
-Na amostra atual:
+A V2 foi validada offline utilizando grupos de cinco mensagens. Antes de sua entrada em produção, será necessário garantir que a estratégia de inferência reproduza a mesma unidade de classificação utilizada no treinamento.
 
-- **94 previsões corretas**;
-- **244 previsões incorretas**;
-- mediana da probabilidade nos acertos: **0,6113**;
-- mediana da probabilidade nos erros: **0,4627**;
-- Mann-Whitney unilateral: `U = 14807`;
-- `p = 1,68 × 10⁻⁵`;
-- rank-biserial aproximado: **+0,291**.
-
-Os resultados fornecem evidência de que a confiança do modelo contém informação sobre a correção da previsão.
-
-### Intervenções
-
-Foram gerados **89 textos** a partir das previsões elegíveis, correspondendo a aproximadamente **26,3% das previsões**.
-
-Entre essas intervenções:
-
-- **39** correspondiam a `ACERTO`;
-- **50** correspondiam a `ERRO`.
-
-A distribuição observada foi:
-
-```text
-ERRO_BAIXO    24
-ACERTO_ALTO   20
-ERRO_MEDIO    14
-ERRO_ALTO     12
-ACERTO_BAIXO  10
-ACERTO_MEDIO   9
-```
-
-A análise de Doppelgängers mostrou que os erros não são distribuídos uniformemente entre as identidades. Algumas identidades aparecem frequentemente como destinos das previsões incorretas, enquanto determinados pares apresentam padrões recorrentes de confusão.
-
-### LLM
-
-Na janela analisada:
-
-- **89 textos gerados**;
-- nenhum texto nulo ou vazio;
-- mediana de aproximadamente **77 palavras** por resposta;
-- latência mediana da Groq de aproximadamente **0,83 s**.
-
-O Worker 3 permanece desativado, portanto os registros continuam como `PENDENTE_ENVIO` e ainda não existem métricas reais de entrega no WhatsApp.
-
-### O que ainda não pode ser concluído
-
-A primeira janela de produção permite observar o comportamento inicial do sistema, mas ainda não permite concluir:
-
-- existência de drift temporal;
-- estabilidade de longo prazo do Macro F1;
-- necessidade de alterar o limiar `0.70`;
-- estabilidade da taxa de intervenção;
-- persistência dos mesmos Doppelgängers ao longo do tempo.
-
-A estratégia atual é acumular novas observações e reexecutar o `06_prod_model_analysis.ipynb` periodicamente.
+| Métrica | V2 — Produção |
+|---|---:|
+| Período analisado | **A preencher** |
+| Grupos avaliados | **A preencher** |
+| Accuracy | **A preencher** |
+| Macro F1 | **A preencher** |
+| Weighted F1 | **A preencher** |
+| Mediana de confiança — acertos | **A preencher** |
+| Mediana de confiança — erros | **A preencher** |
+| Cobertura `P ≥ 0,80` | **A preencher** |
+| Intervenções geradas | **A preencher** |
+| Taxa de intervenção | **A preencher** |
+| Latência ML | **A preencher** |
+| Latência LLM | **A preencher** |
+| Delivery | **A preencher após ativação do Worker 3** |
 
 ---
 
@@ -672,7 +787,9 @@ Durante a validação inicial:
 
 ```text
 Worker 1 → ativo
+
 Worker 2 → ativo
+
 Worker 3 → desativado
 ```
 
@@ -696,14 +813,14 @@ O SCIA combina três problemas diferentes:
 
 ```text
 ┌───────────────────────┐
-│      Machine Learning │
+│   Machine Learning    │
 │                       │
 │ Quem escreveu isso?   │
 └───────────┬───────────┘
             │
             ▼
 ┌───────────────────────┐
-│      Confiança        │
+│       Confiança       │
 │                       │
 │ Devo reagir?          │
 └───────────┬───────────┘
@@ -718,35 +835,41 @@ O SCIA combina três problemas diferentes:
 
 A separação entre essas etapas permite que o modelo estatístico seja responsável pela **identificação e confiança**, enquanto a LLM fica responsável exclusivamente pela **geração do texto**.
 
+Na V2, essa separação é complementada por uma regra de negócio que utiliza `P ≥ 0,80` como crivo mínimo de confiança e um cooldown de cinco minutos por pessoa para controlar a frequência das intervenções.
+
 ---
 
 # 🚀 Próximos passos
 
-- acumular mais dados de produção;
-- reexecutar periodicamente o `06_prod_model_analysis.ipynb`;
-- comparar novas janelas com o baseline atual;
+- finalizar a coleta da primeira semana completa de produção da V1;
+- atualizar as métricas de produção da V1;
+- comparar V1 offline × V1 produção;
+- acumular dados para avaliar estabilidade temporal;
+- acompanhar a relação entre confiança e acerto;
 - acompanhar os principais Doppelgängers;
-- verificar a estabilidade da relação entre confiança e acerto;
-- avaliar possíveis ajustes nos limites de confiança somente após maior volume de dados;
+- validar a nova pipeline V2 em produção;
+- comparar V2 offline × V2 produção;
+- avaliar possíveis ajustes no threshold somente após maior volume de dados;
 - habilitar o Worker 3 após a fase de observação;
 - monitorar latência e sucesso real de delivery;
-- avaliar melhorias futuras no classificador caso os padrões observados em produção sejam persistentes;
 - avaliar o deploy definitivo em VM após validar os requisitos computacionais.
 
 ---
 
 # 👨‍💻 Autor
 
-**Kauã Dias**  
+**Kauã Dias**
+
 Estudante de Estatística — Universidade Federal do Espírito Santo (UFES)
 
-GitHub: https://github.com/kauadp  
+GitHub: https://github.com/kauadp
+
 LinkedIn: https://linkedin.com/in/kauad
 
 ---
 
 # 📄 Licença
 
-Projeto desenvolvido para fins de estudo e experimentação em **Machine Learning, NLP, sistemas de recomendação de intervenção e integração com LLMs**.
+Projeto desenvolvido para fins de estudo e experimentação em **Machine Learning, NLP, classificação de autoria, sistemas de intervenção automatizada e integração com LLMs**.
 
 Os dados originais utilizados no treinamento não são disponibilizados publicamente por conterem mensagens privadas de um grupo do WhatsApp.
