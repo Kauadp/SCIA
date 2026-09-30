@@ -4,11 +4,15 @@ from .prompts import gerar_prompt
 
 def gerar_mensagem(
     categoria: str,
+    autor_real: str,
+    autor_predito: str,
     personalidade: str | None = None,
 ) -> tuple[str, str]:
 
     prompt = gerar_prompt(
         categoria=categoria,
+        autor_real=autor_real,
+        autor_predito=autor_predito,
         personalidade=personalidade,
     )
 

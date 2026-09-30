@@ -14,7 +14,7 @@ MODEL_PATH = (
     RAIZ
     / "artifacts"
     / "models"
-    / "scia_mlp_k25.pt"
+    / "scia_mlp_no_clusters.pt"
 )
 
 
@@ -22,7 +22,7 @@ MODEL_PATH = (
 # CONFIGURAÇÕES
 # ============================================================
 
-INPUT_DIMENSION = 100417
+INPUT_DIMENSION = 100404
 NUM_CLASSES = 13
 
 

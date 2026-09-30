@@ -3,26 +3,14 @@ import pandas as pd
 import joblib
 
 from pathlib import Path
+from scipy.sparse import csr_matrix, hstack
+
 
 # ============================================================
 # CAMINHOS
 # ============================================================
 
 RAIZ = Path(__file__).resolve().parents[2]
-
-UMAP_PATH = (
-    RAIZ
-    / "artifacts"
-    / "clustering"
-    / "umap_cluster.joblib"
-)
-
-KMEANS_PATH = (
-    RAIZ
-    / "artifacts"
-    / "clustering"
-    / "kmeans_25.joblib"
-)
 
 TFIDF_PATH = (
     RAIZ
@@ -40,43 +28,37 @@ EMBEDDING_MODEL_NAME = (
     "paraphrase-multilingual-MiniLM-L12-v2"
 )
 
+EMBEDDING_DIM = 384
+TFIDF_DIM = 100000
 
-DIA_COLUMNS = [
-    "dia_Quarta-feira",
-    "dia_Quinta-feira",
-    "dia_Segunda-feira",
-    "dia_Sexta-feira",
-    "dia_Sábado",
-    "dia_Terça-feira",
+DIA_INICIO_COLUMNS = [
+    "dia_inicio_Quarta-feira",
+    "dia_inicio_Quinta-feira",
+    "dia_inicio_Segunda-feira",
+    "dia_inicio_Sexta-feira",
+    "dia_inicio_Sábado",
+    "dia_inicio_Terça-feira",
 ]
 
-
-CLUSTER_25_COLUMNS = [
-    "cluster_25_1",
-    "cluster_25_2",
-    "cluster_25_3",
-    "cluster_25_4",
-    "cluster_25_5",
-    "cluster_25_6",
-    "cluster_25_7",
-    "cluster_25_8",
-    "cluster_25_9",
-    "cluster_25_10",
-    "cluster_25_11",
-    "cluster_25_12",
-    "cluster_25_13",
-    "cluster_25_14",
-    "cluster_25_15",
-    "cluster_25_16",
-    "cluster_25_17",
-    "cluster_25_18",
-    "cluster_25_19",
-    "cluster_25_20",
-    "cluster_25_21",
-    "cluster_25_22",
-    "cluster_25_23",
-    "cluster_25_24",
+DIA_FIM_COLUMNS = [
+    "dia_fim_Quarta-feira",
+    "dia_fim_Quinta-feira",
+    "dia_fim_Segunda-feira",
+    "dia_fim_Sexta-feira",
+    "dia_fim_Sábado",
+    "dia_fim_Terça-feira",
 ]
+
+DENSE_DIM = (
+    4       # horas
+    + 1     # log_duracao
+    + 6     # dia inicio
+    + 6     # dia fim
+    + 3     # estilometria
+    + 384   # embedding
+)
+
+TOTAL_FEATURES = DENSE_DIM + TFIDF_DIM
 
 
 # ============================================================
@@ -84,7 +66,6 @@ CLUSTER_25_COLUMNS = [
 # ============================================================
 
 embedding_model = None
-
 
 
 def obter_embedding_model():
@@ -101,16 +82,8 @@ def obter_embedding_model():
 
 
 # ============================================================
-# CARREGAMENTO DOS ARTEFATOS
+# ARTEFATOS
 # ============================================================
-
-umap_model = joblib.load(
-    UMAP_PATH
-)
-
-kmeans_model = joblib.load(
-    KMEANS_PATH
-)
 
 tfidf_vectorizer = joblib.load(
     TFIDF_PATH
@@ -122,48 +95,94 @@ tfidf_vectorizer = joblib.load(
 # ============================================================
 
 def criar_features_temporais(df):
-    hora = df["hora"].to_numpy()
 
-    hora_sin = np.sin(
-        2 * np.pi * hora / 24
+    hora_inicio = df["hora_inicio"].to_numpy()
+    hora_fim = df["hora_fim"].to_numpy()
+
+    hora_inicio_sin = np.sin(
+        2 * np.pi * hora_inicio / 24
     ).reshape(-1, 1)
 
-    hora_cos = np.cos(
-        2 * np.pi * hora / 24
+    hora_inicio_cos = np.cos(
+        2 * np.pi * hora_inicio / 24
     ).reshape(-1, 1)
 
-    return hora_sin, hora_cos
+    hora_fim_sin = np.sin(
+        2 * np.pi * hora_fim / 24
+    ).reshape(-1, 1)
+
+    hora_fim_cos = np.cos(
+        2 * np.pi * hora_fim / 24
+    ).reshape(-1, 1)
+
+    return (
+        hora_inicio_sin,
+        hora_inicio_cos,
+        hora_fim_sin,
+        hora_fim_cos,
+    )
 
 
 # ============================================================
-# DUMMIES DO DIA
+# DUMMIES DOS DIAS
 # ============================================================
 
 def criar_dummies_dia(df):
-    dummies = pd.get_dummies(
-        df["dia"],
-        prefix="dia",
+
+    dummies_inicio = pd.get_dummies(
+        df["dia_semana_inicio"],
+        prefix="dia_inicio",
         drop_first=True,
         dtype=float
     )
 
-    dummies = dummies.reindex(
-        columns=DIA_COLUMNS,
+    dummies_inicio = dummies_inicio.reindex(
+        columns=DIA_INICIO_COLUMNS,
         fill_value=0
     )
 
-    return dummies.to_numpy()
+    dummies_fim = pd.get_dummies(
+        df["dia_semana_fim"],
+        prefix="dia_fim",
+        drop_first=True,
+        dtype=float
+    )
 
+    dummies_fim = dummies_fim.reindex(
+        columns=DIA_FIM_COLUMNS,
+        fill_value=0
+    )
 
-# ============================================================
-# ESTILOMETRIA
-# ============================================================
-
-def criar_feature_estilometria(df):
     return (
-        df["caracter_por_mensagem"]
+        dummies_inicio.to_numpy(),
+        dummies_fim.to_numpy()
+    )
+
+
+# ============================================================
+# FEATURES COMPORTAMENTAIS
+# ============================================================
+
+def criar_features_comportamentais(df):
+
+    return np.column_stack([
+        df["qtd_palavras"].to_numpy(),
+        df["qtd_caracteres"].to_numpy(),
+        df["caracter_por_palavra"].to_numpy(),
+    ]).astype(np.float32)
+
+
+# ============================================================
+# DURAÇÃO
+# ============================================================
+
+def criar_feature_duracao(df):
+
+    return (
+        df["log_duracao"]
         .to_numpy()
         .reshape(-1, 1)
+        .astype(np.float32)
     )
 
 
@@ -172,49 +191,25 @@ def criar_feature_estilometria(df):
 # ============================================================
 
 def gerar_embeddings(df):
+
     embeddings = obter_embedding_model().encode(
-        df["mensagem_embedding"].tolist(),
+        df["mensagem"].tolist(),
         normalize_embeddings=True,
         convert_to_numpy=True
     )
 
-    return embeddings.astype(np.float32)
-
-
-# ============================================================
-# CLUSTERING
-# ============================================================
-
-def criar_clusters(embeddings):
-    embedding_reduzido = umap_model.transform(
-        embeddings
+    embeddings = embeddings.astype(
+        np.float32
     )
 
-    clusters = kmeans_model.predict(
-        embedding_reduzido
-    )
+    if embeddings.shape[1] != EMBEDDING_DIM:
+        raise ValueError(
+            f"Dimensão inesperada dos embeddings: "
+            f"{embeddings.shape[1]}. "
+            f"Esperado: {EMBEDDING_DIM}."
+        )
 
-    return clusters
-
-
-# ============================================================
-# DUMMIES DOS CLUSTERS
-# ============================================================
-
-def criar_dummies_cluster25(clusters):
-    dummies = pd.get_dummies(
-        pd.Series(clusters),
-        prefix="cluster_25",
-        drop_first=True,
-        dtype=float
-    )
-
-    dummies = dummies.reindex(
-        columns=CLUSTER_25_COLUMNS,
-        fill_value=0
-    )
-
-    return dummies.to_numpy()
+    return embeddings
 
 
 # ============================================================
@@ -222,143 +217,151 @@ def criar_dummies_cluster25(clusters):
 # ============================================================
 
 def gerar_tfidf(df):
-    return tfidf_vectorizer.transform(
-        df["mensagem_embedding"]
+
+    tfidf = tfidf_vectorizer.transform(
+        df["mensagem"].tolist()
     )
+
+    if tfidf.shape[1] != TFIDF_DIM:
+        raise ValueError(
+            f"Número inesperado de features TF-IDF: "
+            f"{tfidf.shape[1]}. "
+            f"Esperado: {TFIDF_DIM}."
+        )
+
+    return tfidf
 
 
 # ============================================================
-# PIPELINE COMPLETO DE FEATURES
+# PIPELINE COMPLETO
 # ============================================================
 
 def criar_features(
     df,
     retornar_metadados=False
 ):
-    """
-    Transforma o dataframe pré-processado
-    nas features utilizadas pelo MLP.
 
-    Ordem:
-
-    1. hora_sin
-    2. hora_cos
-    3. dia_dummies
-    4. caracter_por_mensagem
-    5. cluster_25_dummies
-    6. embedding
-    7. tfidf
-
-    Se retornar_metadados=True, retorna também
-    as features interpretáveis utilizadas no processamento.
-    """
-
-    # ----------------------------
+    # --------------------------------------------------------
     # Temporais
-    # ----------------------------
+    # --------------------------------------------------------
 
-    hora_sin, hora_cos = (
-        criar_features_temporais(df)
+    (
+        hora_inicio_sin,
+        hora_inicio_cos,
+        hora_fim_sin,
+        hora_fim_cos
+    ) = criar_features_temporais(df)
+
+    # --------------------------------------------------------
+    # Dummies dos dias
+    # --------------------------------------------------------
+
+    (
+        dia_inicio_dummies,
+        dia_fim_dummies
+    ) = criar_dummies_dia(df)
+
+    # --------------------------------------------------------
+    # Duração
+    # --------------------------------------------------------
+
+    log_duracao = criar_feature_duracao(
+        df
     )
 
-    # ----------------------------
-    # Dia
-    # ----------------------------
+    # --------------------------------------------------------
+    # Comportamentais
+    # --------------------------------------------------------
 
-    dia_dummies = criar_dummies_dia(df)
-
-    # ----------------------------
-    # Estilometria
-    # ----------------------------
-
-    estilometria = (
-        criar_feature_estilometria(df)
+    comportamentais = (
+        criar_features_comportamentais(df)
     )
 
-    # ----------------------------
-    # Embedding
-    # ----------------------------
+    # --------------------------------------------------------
+    # Embeddings
+    # --------------------------------------------------------
 
-    embeddings = gerar_embeddings(df)
-
-    # ----------------------------
-    # Clusters
-    # ----------------------------
-
-    clusters = criar_clusters(
-        embeddings
+    embeddings = gerar_embeddings(
+        df
     )
 
-    cluster_dummies = (
-        criar_dummies_cluster25(
-            clusters
-        )
-    )
-
-    # ----------------------------
+    # --------------------------------------------------------
     # TF-IDF
-    # ----------------------------
+    # --------------------------------------------------------
 
-    tfidf = gerar_tfidf(df)
+    tfidf = gerar_tfidf(
+        df
+    )
 
-    # ----------------------------
+    # --------------------------------------------------------
     # Features densas
-    # ----------------------------
+    #
+    # Ordem EXATA da V2:
+    #
+    # hora_inicio_sin
+    # hora_inicio_cos
+    # hora_fim_sin
+    # hora_fim_cos
+    # log_duracao
+    # dia_inicio_dummies
+    # dia_fim_dummies
+    # qtd_palavras
+    # qtd_caracteres
+    # caracter_por_palavra
+    # embedding
+    # --------------------------------------------------------
 
     features_densas = np.hstack([
-        hora_sin,
-        hora_cos,
-        dia_dummies,
-        estilometria,
-        cluster_dummies,
+        hora_inicio_sin,
+        hora_inicio_cos,
+        hora_fim_sin,
+        hora_fim_cos,
+        log_duracao,
+        dia_inicio_dummies,
+        dia_fim_dummies,
+        comportamentais,
         embeddings,
-    ])
+    ]).astype(np.float32)
 
-    # ----------------------------
-    # Validação
-    # ----------------------------
+    # --------------------------------------------------------
+    # Validação das features densas
+    # --------------------------------------------------------
 
-    if features_densas.shape[1] != 417:
+    if features_densas.shape[1] != DENSE_DIM:
+
         raise ValueError(
             f"Número inesperado de features densas: "
             f"{features_densas.shape[1]}. "
-            f"Esperado: 417."
+            f"Esperado: {DENSE_DIM}."
         )
 
-    if tfidf.shape[1] != 100000:
-        raise ValueError(
-            f"Número inesperado de features TF-IDF: "
-            f"{tfidf.shape[1]}. "
-            f"Esperado: 100000."
-        )
-
-    # ----------------------------
+    # --------------------------------------------------------
     # Combinação final
-    # ----------------------------
-
-    from scipy.sparse import csr_matrix, hstack
+    # --------------------------------------------------------
 
     X = hstack([
         csr_matrix(features_densas),
         tfidf
     ]).tocsr()
 
-    # ----------------------------
+    # --------------------------------------------------------
     # Validação final
-    # ----------------------------
+    # --------------------------------------------------------
 
-    if X.shape[1] != 100417:
+    if X.shape[1] != TOTAL_FEATURES:
+
         raise ValueError(
             f"Número final de features: "
             f"{X.shape[1]}. "
-            f"Esperado: 100417."
+            f"Esperado: {TOTAL_FEATURES}."
         )
 
-    # ----------------------------
-    # Retorno
-    # ----------------------------
+    # --------------------------------------------------------
+    # Metadados
+    # --------------------------------------------------------
 
     if not retornar_metadados:
+
         return X
 
     metadados = []
@@ -366,12 +369,56 @@ def criar_features(
     for i in range(len(df)):
 
         metadados.append({
-            "cluster": int(clusters[i]),
-            "dia": df.iloc[i]["dia"],
-            "hora": int(df.iloc[i]["hora"]),
-            "caracter_por_mensagem": float(
-                df.iloc[i]["caracter_por_mensagem"]
+            "dia_inicio": df.iloc[i][
+                "dia_semana_inicio"
+            ],
+
+            "dia_fim": df.iloc[i][
+                "dia_semana_fim"
+            ],
+
+            "hora_inicio": int(
+                df.iloc[i]["hora_inicio"]
+            ),
+
+            "hora_fim": int(
+                df.iloc[i]["hora_fim"]
+            ),
+
+            "log_duracao": float(
+                df.iloc[i]["log_duracao"]
+            ),
+
+            "qtd_palavras": float(
+                df.iloc[i]["qtd_palavras"]
+            ),
+
+            "qtd_caracteres": float(
+                df.iloc[i]["qtd_caracteres"]
+            ),
+
+            "caracter_por_palavra": float(
+                df.iloc[i]["caracter_por_palavra"]
             )
         })
 
     return X, metadados
+
+if __name__ == "__main__":
+
+    from preprocessamento import preprocessar
+    from app.banco.conexao import db
+
+    df = db.carregar_mensagens_raw()
+    df = df.head(100)
+    df_clean = preprocessar(df)
+
+    X, metadados = criar_features(
+        df_clean,
+        retornar_metadados=True
+    )
+
+    print("Shape:", X.shape)
+    print("Densidade:", X.nnz / (X.shape[0] * X.shape[1]))
+    print("Primeiro metadado:")
+    print(metadados[0])

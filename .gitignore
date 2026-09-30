@@ -23,3 +23,7 @@ artifacts/tfidf/*_test.npz
 artifacts/clustering/umap_cluster.joblib
 
 keys/
+
+.pytest_cache/
+
+app/testes/

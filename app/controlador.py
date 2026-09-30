@@ -1,8 +1,9 @@
 from app.banco.conexao import db
-from app.modelo.preditor import prever_mensagem
+from app.modelo.preditor import prever_autor
 from app.llm import gerar_mensagem
 from app.evolution.cliente import enviar_texto
 import logging
+import pandas as pd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,13 +17,11 @@ def classificar_previsao(
     probabilidade: float,
 ) -> str | None:
 
-    if probabilidade < 0.70:
+    if probabilidade < 0.80:
         return None
 
-    if probabilidade < 0.80:
+    if probabilidade < 0.90:
         nivel = "BAIXO"
-    elif probabilidade < 0.90:
-        nivel = "MEDIO"
     else:
         nivel = "ALTO"
 
@@ -33,30 +32,19 @@ def classificar_previsao(
 def montar_mensagem_deteccao(
     autor_real: str,
     autor_predito: str,
-    probabilidade: float,
     texto_llm: str,
 ) -> str:
 
-    prob = f"{probabilidade:.1%}"
-
-    if autor_real == autor_predito:
-        deteccao = (
-            f"🚨 *INSPETOR DETECTOU* 🚨\n\n"
-            f"O INSPETOR DESCONFIA, COM NÍVEL *{prob}* DE CERTEZA, "
-            f"QUE *{autor_real.upper()}* É QUEM DIZ SER."
-        )
-    else:
-        deteccao = (
-            f"🚨 *INSPETOR DETECTOU* 🚨\n\n"
-            f"O INSPETOR DESCONFIA, COM NÍVEL *{prob}* DE CERTEZA, "
-            f"QUE *{autor_real.upper()}* ESTÁ SE PASSANDO POR "
-            f"*{autor_predito.upper()}*."
-        )
+    deteccao = (
+        f"*O INSPETOR DESCONFIA, QUE {autor_real.upper()} ESTÁ SE "
+        f"PASSANDO POR {autor_predito.upper()}.*"
+    )
 
     return (
-        f"{deteccao}\n\n"
+        f"🚨 *INSPETOR DETECTOU* 🚨\n\n"
         f"🕵️ *INSPETOR DIZ:*\n\n"
-        f"\"{texto_llm}\""
+        f"\"{texto_llm}\"\n\n"
+        f"{deteccao}"
     )
 
 class Controlador:
@@ -77,67 +65,141 @@ class Controlador:
         
     def processar_mensagens_pendentes(self):
 
-        mensagens = db.carregar_mensagens_nao_processadas()
+        mensagens = db.carregar_mensagens_v2_pendentes()
 
         logger.info(
             f"{len(mensagens)} mensagens pendentes encontradas."
         )
 
-        for _, mensagem in mensagens.iterrows():
+        if mensagens.empty:
+            return
 
-            mensagem_id = int(mensagem["id"])
+        mensagens["data_hora"] = pd.to_datetime(
+            mensagens["data_hora"]
+        )
+
+        mensagens["grupo_5"] = (
+            mensagens
+            .groupby("membro")
+            .cumcount() // 5
+        )
+
+        grupos = list(
+            mensagens.groupby(
+                ["membro", "grupo_5"],
+                sort=False
+            )
+        )
+
+        logger.warning(
+            "DEBUG GRUPOS: %s",
+            [
+                (
+                    membro,
+                    grupo_id,
+                    len(grupo),
+                    grupo["id"].astype(int).tolist()
+                )
+                for (membro, grupo_id), grupo in grupos
+            ]
+        )
+
+        for (membro, grupo_id), grupo in grupos:
+
+            if len(grupo) < 5:
+                logger.info(
+                    f"Grupo incompleto ignorado. "
+                    f"Membro: {membro} | "
+                    f"Mensagens: {len(grupo)}/5"
+                )
+                continue
+
+            ids = grupo["id"].astype(int).tolist()
 
             try:
-                dados_mensagem = {
-                    "data_hora": mensagem["data_hora"],
-                    "membro": mensagem["membro"],
-                    "mensagem": mensagem["mensagem"],
-                }
 
-                resultado = prever_mensagem(dados_mensagem)
+                dados_grupo = grupo[
+                    ["data_hora", "membro", "mensagem"]
+                ].copy()
 
-                if resultado is None:
+                resultados = prever_autor(dados_grupo)
+
+                if resultados is None or len(resultados) == 0:
                     logger.warning(
-                        f"Não foi possível prever mensagem {mensagem_id}."
+                        f"Não foi possível prever grupo "
+                        f"{grupo_id} do membro {membro}."
                     )
                     continue
 
+                resultado = resultados[0]
+
+                autor_real = grupo["membro"].iloc[0]
+                autor_predito = resultado["autor_previsto"]
+                probabilidade = resultado["probabilidade"]
+
                 features = {
-                    "dia": resultado["dia"],
-                    "hora": resultado["hora"],
-                    "cluster": resultado["cluster"],
-                    "caracter_por_mensagem": resultado["caracter_por_mensagem"],
+                    "dia_inicio": resultado["dia_inicio"],
+                    "dia_fim": resultado["dia_fim"],
+                    "hora_inicio": resultado["hora_inicio"],
+                    "hora_fim": resultado["hora_fim"],
+                    "log_duracao": resultado["log_duracao"],
+                    "qtd_palavras": resultado["qtd_palavras"],
+                    "qtd_caracteres": resultado["qtd_caracteres"],
+                    "caracter_por_palavra": resultado["caracter_por_palavra"],
                 }
 
-
                 categoria = classificar_previsao(
-                    autor_real=mensagem["membro"],
-                    autor_predito=resultado["autor_previsto"],
-                    probabilidade=resultado["probabilidade"],
+                    autor_real=autor_real,
+                    autor_predito=autor_predito,
+                    probabilidade=probabilidade,
                 )
 
-                db.inserir_previsao(
+                mensagem_consolidada = " ".join(
+                    grupo["mensagem"]
+                    .fillna("")
+                    .astype(str)
+                )
+
+                # Primeiro ID do grupo como âncora da previsão
+                mensagem_id = ids[0]
+
+                previsao_id = db.inserir_previsao(
                     mensagem_id=mensagem_id,
-                    mensagem=mensagem["mensagem"],
-                    autor_real=mensagem["membro"],
-                    autor_predito=resultado["autor_previsto"],
-                    probabilidade=resultado["probabilidade"],
+                    mensagem=mensagem_consolidada,
+                    autor_real=autor_real,
+                    autor_predito=autor_predito,
+                    probabilidade=probabilidade,
                     categoria=categoria,
                     features=features,
                 )
 
-                db.marcar_mensagem_processada(mensagem_id)
+                if previsao_id is None:
+                    logger.error(
+                        f"Não foi possível obter a previsão "
+                        f"do grupo {grupo_id}. "
+                        f"IDs: {ids}"
+                    )
+                    continue
+
+                db.marcar_mensagens_processadas(ids)
+                
+                if categoria is None:
+                    db.marcar_previsao_processada(previsao_id)
 
                 logger.info(
-                    f"Mensagem {mensagem_id} processada. "
-                    f"Real: {mensagem['membro']} | "
-                    f"Previsto: {resultado['autor_previsto']} | "
-                    f"Confiança: {resultado['probabilidade']:.2%}"
+                    f"Grupo processado com sucesso. "
+                    f"Membro: {autor_real} | "
+                    f"IDs: {ids} | "
+                    f"Previsto: {autor_predito} | "
+                    f"Confiança: {probabilidade:.2%} | "
+                    f"Categoria: {categoria}"
                 )
 
             except Exception:
                 logger.exception(
-                    f"Erro ao processar mensagem {mensagem_id}."
+                    f"Erro ao processar grupo {grupo_id} "
+                    f"do membro {membro}. "
+                    f"IDs: {ids}"
                 )
 
     def processar_previsoes_pendentes(self):
@@ -178,13 +240,12 @@ class Controlador:
 
             try:
                 texto, personalidade = gerar_mensagem(
-                    categoria=categoria
+                    categoria=categoria,
+                    autor_real=autor_real,
+                    autor_predito=previsao["autor_predito"],
                 )
 
                 texto_final = montar_mensagem_deteccao(
-                    autor_real=autor_real,
-                    autor_predito=previsao["autor_predito"],
-                    probabilidade=previsao["probabilidade"],
                     texto_llm=texto,
                 )
 

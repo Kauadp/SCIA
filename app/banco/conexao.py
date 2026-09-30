@@ -50,10 +50,11 @@ class DatabaseManager:
                 :mensagem,
                 FALSE
             )
+            RETURNING id
         """)
 
         with self.engine.begin() as conn:
-            conn.execute(
+            resultado = conn.execute(
                 query,
                 {
                     "membro": membro,
@@ -61,6 +62,8 @@ class DatabaseManager:
                     "mensagem": mensagem,
                 }
             )
+
+            return resultado.scalar_one()
 
     def marcar_mensagem_processada(self, mensagem_id: int):
         query = text("""
@@ -73,6 +76,24 @@ class DatabaseManager:
             conn.execute(
                 query,
                 {"id": mensagem_id}
+            )
+
+    def marcar_mensagens_processadas(self, mensagem_ids: list[int]):
+        if not mensagem_ids:
+            return
+
+        query = text("""
+            UPDATE mensagens_raw
+            SET processada = TRUE
+            WHERE id = ANY(:mensagem_ids)
+        """)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                query,
+                {
+                    "mensagem_ids": mensagem_ids
+                }
             )
 
     def carregar_mensagens_nao_processadas(self):
@@ -91,6 +112,36 @@ class DatabaseManager:
         with self.engine.begin() as conn:
             return pd.read_sql(query, conn)
 
+    def carregar_mensagens_v2_pendentes(self):
+        query = text("""
+            SELECT
+                id,
+                membro,
+                data_hora,
+                mensagem
+            FROM mensagens_raw
+            WHERE processada = FALSE
+            ORDER BY membro, data_hora, id
+        """)
+
+        with self.engine.begin() as conn:
+            return pd.read_sql(query, conn)
+
+    def carregar_mensagens_raw(self): # Para testes
+            query = text("""
+                SELECT
+                    id,
+                    membro,
+                    data_hora,
+                    mensagem,
+                    processada
+                FROM mensagens_raw
+                ORDER BY id
+            """)
+    
+            with self.engine.begin() as conn:
+                return pd.read_sql(query, conn)
+
     def inserir_previsao(
         self,
         mensagem_id: int,
@@ -98,33 +149,45 @@ class DatabaseManager:
         autor_real: str,
         autor_predito: str,
         probabilidade: float,
-        categoria: str,
+        categoria: str | None,
         features: dict,
         status_bot: str = "PENDENTE"
     ):
+
         query = text("""
-            INSERT INTO previsoes (
-                mensagem_id,
-                mensagem,
-                autor_real,
-                autor_predito,
-                probabilidade,
-                categoria,
-                features,
-                status_bot
+            WITH nova_previsao AS (
+                INSERT INTO previsoes (
+                    mensagem_id,
+                    mensagem,
+                    autor_real,
+                    autor_predito,
+                    probabilidade,
+                    categoria,
+                    features,
+                    status_bot
+                )
+                VALUES (
+                    :mensagem_id,
+                    :mensagem,
+                    :autor_real,
+                    :autor_predito,
+                    :probabilidade,
+                    :categoria,
+                    CAST(:features AS JSONB),
+                    :status_bot
+                )
+                ON CONFLICT (mensagem_id) DO NOTHING
+                RETURNING id
             )
-            VALUES (
-                :mensagem_id,
-                :mensagem,
-                :autor_real,
-                :autor_predito,
-                :probabilidade,
-                :categoria,
-                CAST(:features AS JSONB),
-                :status_bot
-            )
-            ON CONFLICT (mensagem_id) DO NOTHING
-            RETURNING id
+            SELECT id FROM nova_previsao
+
+            UNION ALL
+
+            SELECT id
+            FROM previsoes
+            WHERE mensagem_id = :mensagem_id
+
+            LIMIT 1
         """)
 
         with self.engine.begin() as conn:
@@ -137,25 +200,12 @@ class DatabaseManager:
                     "autor_predito": autor_predito,
                     "probabilidade": probabilidade,
                     "categoria": categoria,
-                    "features": json.dumps(features, ensure_ascii=False),
-                    "status_bot": status_bot,
+                    "features": json.dumps(features),
+                    "status_bot": status_bot
                 }
             )
 
             return resultado.scalar_one_or_none()
-
-    def marcar_mensagem_processada(self, mensagem_id: int):
-        query = text("""
-            UPDATE mensagens_raw
-            SET processada = TRUE
-            WHERE id = :mensagem_id
-        """)
-
-        with self.engine.begin() as conn:
-            conn.execute(
-                query,
-                {"mensagem_id": mensagem_id}
-            )
 
     def carregar_previsoes_pendentes(self):
 
@@ -183,7 +233,6 @@ class DatabaseManager:
         personalidade: str,
         texto: str,
     ):
-
         query = text("""
             INSERT INTO mensagens_bot (
                 previsao_id,
@@ -199,10 +248,12 @@ class DatabaseManager:
                 :texto,
                 'PENDENTE_ENVIO'
             )
+            ON CONFLICT (previsao_id) DO NOTHING
+            RETURNING id
         """)
 
         with self.engine.begin() as conn:
-            conn.execute(
+            resultado = conn.execute(
                 query,
                 {
                     "previsao_id": previsao_id,
@@ -211,6 +262,8 @@ class DatabaseManager:
                     "texto": texto,
                 }
             )
+
+            return resultado.scalar_one_or_none()
 
     def marcar_previsao_processada(self, previsao_id: int):
 
