@@ -27,3 +27,5 @@ keys/
 .pytest_cache/
 
 app/testes/
+
+relatorios/relatorio_semanal.pdf

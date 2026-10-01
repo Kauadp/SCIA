@@ -29,22 +29,11 @@ def classificar_previsao(
 
     return f"{tipo}_{nivel}"
 
-def montar_mensagem_deteccao(
-    autor_real: str,
-    autor_predito: str,
-    texto_llm: str,
-) -> str:
-
-    deteccao = (
-        f"*O INSPETOR DESCONFIA, QUE {autor_real.upper()} ESTÁ SE "
-        f"PASSANDO POR {autor_predito.upper()}.*"
-    )
-
+def montar_mensagem_deteccao(texto_llm: str) -> str:
     return (
         f"🚨 *INSPETOR DETECTOU* 🚨\n\n"
         f"🕵️ *INSPETOR DIZ:*\n\n"
-        f"\"{texto_llm}\"\n\n"
-        f"{deteccao}"
+        f"\"{texto_llm}\""
     )
 
 class Controlador:
@@ -246,7 +235,7 @@ class Controlador:
                 )
 
                 texto_final = montar_mensagem_deteccao(
-                    texto_llm=texto,
+                    texto_llm=texto
                 )
 
                 db.inserir_mensagem_bot(
