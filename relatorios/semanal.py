@@ -1,8 +1,8 @@
-from dados import db
-from metricas import calcular_metricas
-from graficos import gerar_graficos
-from pdf import construir_pdf
-from evolution import enviar_pdf
+from relatorios.dados import db
+from relatorios.metricas import calcular_metricas
+from relatorios.graficos import gerar_graficos
+from relatorios.pdf import construir_pdf
+from relatorios.evolution import enviar_pdf
 
 df_raw = db.carregar_mensagens_raw()
 df_prev = db.carregar_previsoes()
