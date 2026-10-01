@@ -14,3 +14,7 @@ psycopg[binary]
 python-dotenv
 
 groq
+
+statsmodels
+matplotlib
+seaborn
