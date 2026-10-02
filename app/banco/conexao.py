@@ -405,6 +405,93 @@ class DatabaseManager:
 
         return mensagem
 
+    def carregar_dados_recompensa(self):
+        query = """
+            SELECT
+                autor_real AS membro,
+                COUNT(*) AS grupos_avaliados,
+
+                COUNT(*) FILTER (
+                    WHERE categoria = 'ERRO_BAIXO'
+                ) AS erro_baixo,
+
+                COUNT(*) FILTER (
+                    WHERE categoria = 'ERRO_ALTO'
+                ) AS erro_alto,
+
+                COUNT(*) FILTER (
+                    WHERE categoria = 'ACERTO_BAIXO'
+                ) AS acerto_baixo,
+
+                COUNT(*) FILTER (
+                    WHERE categoria = 'ACERTO_ALTO'
+                ) AS acerto_alto
+
+            FROM previsoes
+            GROUP BY autor_real
+            ORDER BY autor_real;
+        """
+
+        with self.engine.connect() as conn:
+            resultado = conn.execute(text(query))
+
+            return [dict(row._mapping) for row in resultado]
+
+    def inserir_recompensa(
+        self,
+        membro: str,
+        recompensa: int,
+    ):
+        query = """
+            INSERT INTO recompensas (
+                membro,
+                recompensa
+            )
+            VALUES (
+                :membro,
+                :recompensa
+            )
+        """
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(query),
+                {
+                    "membro": membro,
+                    "recompensa": recompensa,
+                }
+            )
+
+    def carregar_previsoes_periodo(
+        self,
+        inicio,
+        fim,
+    ):
+        query = """
+            SELECT
+                autor_real,
+                autor_predito,
+                probabilidade,
+                categoria,
+                mensagem,
+                processado_em
+            FROM previsoes
+            WHERE processado_em >= :inicio
+            AND processado_em < :fim
+            ORDER BY processado_em;
+        """
+
+        with self.engine.connect() as conn:
+            resultado = conn.execute(
+                text(query),
+                {
+                    "inicio": inicio,
+                    "fim": fim,
+                }
+            )
+
+            return [dict(row._mapping) for row in resultado]
+
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 

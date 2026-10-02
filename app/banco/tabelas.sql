@@ -33,3 +33,10 @@ CREATE TABLE IF NOT EXISTS mensagens_bot (
     gerado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     enviado_em TIMESTAMPTZ
 );
+
+CREATE TABLE recompensas (
+    id SERIAL PRIMARY KEY,
+    membro VARCHAR(100) NOT NULL,
+    recompensa BIGINT NOT NULL,
+    criado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
