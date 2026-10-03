@@ -363,7 +363,7 @@ class DatabaseManager:
                 COUNT(*) AS quantidade
             FROM previsoes
             WHERE autor_real = :membro
-            AND probabilidade >= 0.70
+            AND probabilidade >= 0.80
             GROUP BY autor_real, autor_predito
             ORDER BY quantidade DESC
         """)
